@@ -1,0 +1,124 @@
+name: Update from upstream
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-from-upstream
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    container: fedora:44
+
+    steps:
+      - name: Check out packaging repository
+        uses: actions/checkout@v4
+
+      - name: Install packaging tools
+        run: dnf install -y copr-cli cpio curl git jq rpm-build
+
+      - name: Check latest stable release
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          tag=$(curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/cjpais/Handy/releases/latest \
+            | jq --raw-output '.tag_name')
+          version=${tag#v}
+
+          if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Unexpected release tag: $tag" >&2
+            exit 1
+          fi
+
+          current=$(awk '$1 == "Version:" { print $2; exit }' handy-bin.spec)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          if [[ $version == "$current" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Already packaged: $version"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "New stable release: $current -> $version"
+          fi
+
+      - name: Update spec version
+        if: steps.release.outputs.changed == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          sed -i -E "s/^Version:[[:space:]]+.*/Version:        $VERSION/" handy-bin.spec
+          release_date=$(LC_ALL=C date '+%a %b %d %Y')
+          sed -i "/^%changelog/a * $release_date Ponesicek <ponesicek@users.noreply.github.com> - $VERSION-1\\
+          - Package upstream Handy $VERSION binary release" handy-bin.spec
+
+      - name: Build and submit architecture packages
+        if: steps.release.outputs.changed == 'true'
+        shell: bash
+        env:
+          COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z $COPR_CONFIG ]]; then
+            echo "The COPR_CONFIG repository secret is not configured" >&2
+            exit 1
+          fi
+
+          install -d -m 0700 ~/.config
+          printf '%s' "$COPR_CONFIG" > ~/.config/copr
+          chmod 0600 ~/.config/copr
+
+          for arch in x86_64 aarch64; do
+            topdir="$RUNNER_TEMP/rpmbuild-$arch"
+            mkdir -p "$topdir"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
+
+            curl --fail --show-error --location --retry 3 \
+              --output "$topdir/SOURCES/Handy-$VERSION-1.$arch.rpm" \
+              "https://github.com/cjpais/Handy/releases/download/v$VERSION/Handy-$VERSION-1.$arch.rpm"
+            curl --fail --silent --show-error --location --retry 3 \
+              --output "$topdir/SOURCES/LICENSE" \
+              "https://raw.githubusercontent.com/cjpais/Handy/v$VERSION/LICENSE"
+
+            rpmbuild -bs --target "$arch" \
+              --define "_topdir $topdir" \
+              handy-bin.spec
+
+            srpm=$(find "$topdir/SRPMS" -maxdepth 1 -name '*.src.rpm' -print -quit)
+            test -n "$srpm"
+            copr build ponesicek/handy-bin \
+              --chroot "fedora-44-$arch" \
+              "$srpm"
+          done
+
+      - name: Commit packaged version
+        if: steps.release.outputs.changed == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add handy-bin.spec
+          git commit -m "chore: package Handy $VERSION"
+          git push
