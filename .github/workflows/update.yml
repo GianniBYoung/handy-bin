@@ -70,7 +70,7 @@ jobs:
 
           sed -i -E "s/^Version:[[:space:]]+.*/Version:        $VERSION/" handy-bin.spec
           release_date=$(LC_ALL=C date '+%a %b %d %Y')
-          sed -i "/^%changelog/a * $release_date Ponesicek <ponesicek@users.noreply.github.com> - $VERSION-1\\
+          sed -i "/^%changelog/a * $release_date GianniBYoung <GianniBYoung@users.noreply.github.com> - $VERSION-1\\
           - Package upstream Handy $VERSION binary release" handy-bin.spec
 
       - name: Build and submit architecture packages
@@ -108,8 +108,10 @@ jobs:
 
             srpm=$(find "$topdir/SRPMS" -maxdepth 1 -name '*.src.rpm' -print -quit)
             test -n "$srpm"
-            copr build ponesicek/handy-bin \
+            copr build countmancy/handy-bin \
+              --chroot "fedora-43-$arch" \
               --chroot "fedora-44-$arch" \
+              --chroot "fedora-45-$arch" \
               "$srpm"
           done
 
@@ -118,7 +120,7 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ steps.release.outputs.version }}
-        run: |
+        run: |-
           set -euo pipefail
 
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
