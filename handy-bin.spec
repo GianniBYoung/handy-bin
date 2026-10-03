@@ -1,7 +1,7 @@
 %global upstream_release 1
 
 Name:           handy-bin
-Version:        0.9.7
+Version:        0.9.8
 Release:        1%{?dist}
 Summary:        Offline speech-to-text application (upstream binary package)
 
@@ -51,6 +51,8 @@ install -Dpm 0644 %{SOURCE1} %{buildroot}%{_licensedir}/%{name}/LICENSE
 
 
 %changelog
+* Sat Oct 03 2026 Ponesicek <ponesicek@users.noreply.github.com> - 0.9.8-1
+- Package upstream Handy 0.9.8 binary release
 * Fri Sep 18 2026 Ponesicek <ponesicek@users.noreply.github.com> - 0.9.7-1
 - Package upstream Handy 0.9.7 binary release
 * Mon Aug 24 2026 Ponesicek <ponesicek@users.noreply.github.com> - 0.9.6-1
